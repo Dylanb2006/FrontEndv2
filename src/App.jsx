@@ -77,6 +77,7 @@ function App() {
   const notify = (message, type = 'success') => setNotification({ message, type })
 
   const handleSendBulkEmails = async (csvData) => {
+    console.log('CSV Data being sent:', csvData)
     setSendingBulk(true)
     setBulkProgress({ sent: 0, total: csvData.length })
 
@@ -88,10 +89,12 @@ function App() {
       })
       
       const result = await res.json()
+      console.log('Server response:', result)
       setBulkProgress({ sent: result.sent, total: csvData.length })
       notify(`Successfully sent ${result.sent} emails` + (result.failed > 0 ? `. ${result.failed} failed.` : ''))
       fetchEmailStats()
     } catch (err) {
+      console.error('Send error:', err)
       notify('Error sending emails: ' + err.message, 'error')
     } finally {
       setSendingBulk(false)
@@ -539,7 +542,5 @@ function ImportModal({ onSend, onClose }) {
     </div>
   )
 }
-
-export default App
 
 export default App
