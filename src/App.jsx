@@ -20,9 +20,9 @@ const PIPELINE_STAGES = [
 ]
 
 const SENDER_CONFIG = {
-  yourName: 'Nic Ganley',
-  yourCompany: 'Iron Valley Real Estate',
-  yourPhone: '(302) 612-0329'
+  yourName: 'Dylan Bennett',
+  yourCompany: 'ABC Real Estate',
+  yourPhone: '(302) 922-4238'
 }
 
 function App() {
@@ -39,10 +39,13 @@ function App() {
   const [bulkProgress, setBulkProgress] = useState({ sent: 0, total: 0 })
   const [emailStats, setEmailStats] = useState({ totalSent: 0 })
   const [draggedContact, setDraggedContact] = useState(null)
+  const [followUps, setFollowUps] = useState([])
+  const [sendingFollowUps, setSendingFollowUps] = useState(false)
 
   useEffect(() => { 
     fetchContacts()
     fetchEmailStats()
+    fetchFollowUps()
   }, [])
 
   useEffect(() => {
@@ -71,6 +74,36 @@ function App() {
       if (res.ok) setEmailStats(await res.json())
     } catch (err) {
       console.error(err)
+    }
+  }
+
+  const fetchFollowUps = async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/follow-ups`)
+      if (res.ok) setFollowUps(await res.json())
+    } catch (err) {
+      console.error(err)
+    }
+  }
+
+  const handleSendFollowUps = async () => {
+    if (!confirm(`Send follow-up emails to ${followUps.length} contacts who haven't replied?`)) return
+    
+    setSendingFollowUps(true)
+    try {
+      const res = await fetch(`${API_URL}/api/send-follow-ups`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(SENDER_CONFIG)
+      })
+      const result = await res.json()
+      notify(`Sent ${result.sent} follow-up emails` + (result.failed > 0 ? `. ${result.failed} failed.` : ''))
+      fetchFollowUps()
+      fetchEmailStats()
+    } catch (err) {
+      notify('Error sending follow-ups: ' + err.message, 'error')
+    } finally {
+      setSendingFollowUps(false)
     }
   }
 
@@ -184,6 +217,10 @@ function App() {
               </button>
               <button onClick={() => setView('table')} className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${view === 'table' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}>
                 Table
+              </button>
+              <button onClick={() => setView('followups')} className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${view === 'followups' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}>
+                Follow-ups
+                {followUps.length > 0 && <span className="ml-1.5 bg-amber-500 text-white text-xs px-1.5 py-0.5 rounded-full">{followUps.length}</span>}
               </button>
             </div>
 
@@ -340,6 +377,75 @@ function App() {
                 ))}
               </tbody>
             </table>
+          </div>
+        ) : (
+          /* Follow-ups View */
+          <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+            <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
+              <div>
+                <h2 className="text-sm font-semibold text-slate-900">Follow-ups Needed</h2>
+                <p className="text-sm text-slate-500 mt-0.5">People who were emailed but haven't replied yet</p>
+              </div>
+              <button
+                onClick={handleSendFollowUps}
+                disabled={followUps.length === 0 || sendingFollowUps}
+                className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-amber-500 rounded-lg hover:bg-amber-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {sendingFollowUps ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    Sending...
+                  </>
+                ) : (
+                  <>
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" /></svg>
+                    Send All Follow-ups ({followUps.length})
+                  </>
+                )}
+              </button>
+            </div>
+            
+            {followUps.length === 0 ? (
+              <div className="p-12 text-center">
+                <svg className="w-12 h-12 text-slate-300 mx-auto mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <p className="text-sm font-medium text-slate-900">All caught up!</p>
+                <p className="text-sm text-slate-500 mt-1">No pending follow-ups. Import new leads to get started.</p>
+              </div>
+            ) : (
+              <table className="w-full">
+                <thead>
+                  <tr className="bg-slate-50 border-b border-slate-200">
+                    <th className="text-left text-xs font-medium text-slate-500 uppercase px-6 py-3">Contact</th>
+                    <th className="text-left text-xs font-medium text-slate-500 uppercase px-6 py-3">Property</th>
+                    <th className="text-left text-xs font-medium text-slate-500 uppercase px-6 py-3">Type</th>
+                    <th className="text-left text-xs font-medium text-slate-500 uppercase px-6 py-3">Times Emailed</th>
+                    <th className="text-left text-xs font-medium text-slate-500 uppercase px-6 py-3">Last Emailed</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {followUps.map((f, i) => (
+                    <tr key={i} className="hover:bg-slate-50">
+                      <td className="px-6 py-4">
+                        <p className="text-sm font-medium text-slate-900">{f.name || '—'}</p>
+                        <p className="text-sm text-slate-500">{f.email}</p>
+                      </td>
+                      <td className="px-6 py-4 text-sm text-slate-600 max-w-xs truncate">{f.address || '—'}</td>
+                      <td className="px-6 py-4">
+                        <span className={`inline-flex px-2.5 py-1 rounded-md text-xs font-medium ${getTypeInfo(f.type).color}`}>{getTypeInfo(f.type).label}</span>
+                      </td>
+                      <td className="px-6 py-4">
+                        <span className="inline-flex px-2.5 py-1 rounded-full text-xs font-medium bg-slate-100 text-slate-700">{f.email_count}x</span>
+                      </td>
+                      <td className="px-6 py-4 text-sm text-slate-500">
+                        {f.sent_at ? new Date(f.sent_at).toLocaleDateString() : '—'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
           </div>
         )}
       </main>
