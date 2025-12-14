@@ -20,9 +20,9 @@ const PIPELINE_STAGES = [
 ]
 
 const SENDER_CONFIG = {
-  yourName: 'Dylan Bennett',
-  yourCompany: 'ABC Real Estate',
-  yourPhone: '(302) 922-4238'
+  yourName: 'Nic Ganley',
+  yourCompany: 'Iron Valley Real Estate',
+  yourPhone: '(302) 612-0329'
 }
 
 function App() {
