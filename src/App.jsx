@@ -401,5 +401,4 @@ function CSVImportModal({ onImport, onClose, importing }) {
 
 export default App
 
-export default App
 
