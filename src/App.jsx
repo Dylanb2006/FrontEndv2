@@ -18,7 +18,6 @@ const STATUS_OPTIONS = [
   { value: 'closed', label: 'Closed', color: 'bg-purple-100 text-purple-800' },
 ]
 
-// UPDATE THESE WITH YOUR INFO
 const SENDER_CONFIG = {
   yourName: 'Dylan Bennett',
   yourCompany: 'ABC Real Estate',
@@ -26,22 +25,24 @@ const SENDER_CONFIG = {
 }
 
 function App() {
-  const [contacts, setContacts] = useState([])
+  const [contacts, setContacts] = useState([])  // Leads from database (people who replied)
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
   const [showModal, setShowModal] = useState(false)
   const [showImportModal, setShowImportModal] = useState(false)
   const [editingContact, setEditingContact] = useState(null)
   const [searchTerm, setSearchTerm] = useState('')
   const [filterType, setFilterType] = useState('')
   const [filterStatus, setFilterStatus] = useState('')
-  const [sendingEmail, setSendingEmail] = useState(null)
   const [notification, setNotification] = useState(null)
-  const [importing, setImporting] = useState(false)
   const [sendingBulk, setSendingBulk] = useState(false)
   const [bulkProgress, setBulkProgress] = useState({ sent: 0, total: 0 })
+  const [emailStats, setEmailStats] = useState({ totalSent: 0 })
 
-  useEffect(() => { fetchContacts() }, [])
+  useEffect(() => { 
+    fetchContacts()
+    fetchEmailStats()
+  }, [])
+
   useEffect(() => {
     if (notification) {
       const timer = setTimeout(() => setNotification(null), 4000)
@@ -53,104 +54,50 @@ function App() {
     try {
       setLoading(true)
       const res = await fetch(`${API_URL}/api/contacts`)
-      if (!res.ok) throw new Error('Failed to fetch contacts')
+      if (!res.ok) throw new Error('Failed to fetch')
       setContacts(await res.json())
-      setError(null)
     } catch (err) {
-      setError(err.message)
+      console.error(err)
     } finally {
       setLoading(false)
     }
   }
 
+  const fetchEmailStats = async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/email-stats`)
+      if (res.ok) setEmailStats(await res.json())
+    } catch (err) {
+      console.error(err)
+    }
+  }
+
   const showNotification = (message, type = 'success') => setNotification({ message, type })
 
-  const handleSendEmail = async (contact) => {
-    setSendingEmail(contact.id)
+  // Send bulk emails from CSV (does NOT save to database)
+  const handleSendBulkEmails = async (csvData) => {
+    setSendingBulk(true)
+    setBulkProgress({ sent: 0, total: csvData.length })
+
     try {
-      const res = await fetch(`${API_URL}/api/contacts/${contact.id}/send-email`, {
+      const res = await fetch(`${API_URL}/api/send-bulk-emails`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(SENDER_CONFIG)
+        body: JSON.stringify({
+          leads: csvData,
+          ...SENDER_CONFIG
+        })
       })
+      
       const result = await res.json()
-      if (result.success) {
-        showNotification(`Email sent to ${contact.email}!`)
-        await fetchContacts()
-      } else throw new Error(result.error)
+      setBulkProgress({ sent: result.sent, total: csvData.length })
+      showNotification(`Sent ${result.sent} emails${result.failed > 0 ? `, ${result.failed} failed` : ''}`)
+      fetchEmailStats()
     } catch (err) {
-      showNotification(err.message, 'error')
+      showNotification('Error sending emails: ' + err.message, 'error')
     } finally {
-      setSendingEmail(null)
-    }
-  }
-
-  const handleSendAllEmails = async () => {
-    const uncontacted = contacts.filter(c => !c.last_contacted_date && c.email)
-    if (uncontacted.length === 0) return showNotification('No new contacts to email', 'error')
-    if (!confirm(`Send emails to ${uncontacted.length} contacts?`)) return
-
-    setSendingBulk(true)
-    setBulkProgress({ sent: 0, total: uncontacted.length })
-    let successCount = 0, failCount = 0
-
-    for (let i = 0; i < uncontacted.length; i++) {
-      try {
-        const res = await fetch(`${API_URL}/api/contacts/${uncontacted[i].id}/send-email`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(SENDER_CONFIG)
-        })
-        if ((await res.json()).success) successCount++
-        else failCount++
-      } catch { failCount++ }
-      setBulkProgress({ sent: i + 1, total: uncontacted.length })
-      if (i < uncontacted.length - 1) await new Promise(r => setTimeout(r, 3000))
-    }
-    setSendingBulk(false)
-    await fetchContacts()
-    showNotification(`Sent ${successCount} emails${failCount > 0 ? `, ${failCount} failed` : ''}`)
-  }
-
-  const handleCSVImport = async (csvData, sendEmailsAfter) => {
-    setImporting(true)
-    const imported = []
-    for (const row of csvData) {
-      try {
-        const res = await fetch(`${API_URL}/api/contacts`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(row)
-        })
-        if (res.ok) imported.push(await res.json())
-      } catch {}
-    }
-    setImporting(false)
-    setShowImportModal(false)
-    await fetchContacts()
-    showNotification(`Imported ${imported.length} contacts`)
-    
-    if (sendEmailsAfter && imported.length > 0) {
-      setTimeout(async () => {
-        setSendingBulk(true)
-        setBulkProgress({ sent: 0, total: imported.length })
-        let success = 0
-        for (let i = 0; i < imported.length; i++) {
-          try {
-            const res = await fetch(`${API_URL}/api/contacts/${imported[i].id}/send-email`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(SENDER_CONFIG)
-            })
-            if ((await res.json()).success) success++
-          } catch {}
-          setBulkProgress({ sent: i + 1, total: imported.length })
-          if (i < imported.length - 1) await new Promise(r => setTimeout(r, 3000))
-        }
-        setSendingBulk(false)
-        await fetchContacts()
-        showNotification(`Sent ${success} emails`)
-      }, 1000)
+      setSendingBulk(false)
+      setShowImportModal(false)
     }
   }
 
@@ -174,17 +121,30 @@ function App() {
     showNotification(editingContact ? 'Updated!' : 'Added!')
   }
 
+  const handleSendEmail = async (contact) => {
+    try {
+      const res = await fetch(`${API_URL}/api/contacts/${contact.id}/send-email`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(SENDER_CONFIG)
+      })
+      const result = await res.json()
+      if (result.success) {
+        showNotification(`Email sent to ${contact.email}!`)
+        fetchContacts()
+        fetchEmailStats()
+      } else {
+        showNotification(result.error || 'Failed to send', 'error')
+      }
+    } catch (err) {
+      showNotification('Error: ' + err.message, 'error')
+    }
+  }
+
   const filtered = contacts.filter(c => {
     const search = !searchTerm || [c.name, c.firstName, c.lastName, c.email, c.address].some(f => f?.toLowerCase().includes(searchTerm.toLowerCase()))
     return search && (!filterType || c.type === filterType) && (!filterStatus || c.status === filterStatus)
   })
-
-  const stats = {
-    total: contacts.length,
-    notEmailed: contacts.filter(c => !c.last_contacted_date).length,
-    emailed: contacts.filter(c => c.last_contacted_date).length,
-    interested: contacts.filter(c => c.status === 'interested').length,
-  }
 
   const getTypeInfo = (type) => LEAD_TYPES.find(t => t.value === type?.toLowerCase()) || { label: type || 'Unknown', color: 'bg-gray-100 text-gray-800' }
   const getName = (c) => c.name || `${c.firstName || ''} ${c.lastName || ''}`.trim() || 'Unknown'
@@ -198,12 +158,9 @@ function App() {
             <p className="text-xs text-slate-500">{SENDER_CONFIG.yourCompany}</p>
           </div>
           <div className="flex gap-3">
-            {stats.notEmailed > 0 && (
-              <button onClick={handleSendAllEmails} disabled={sendingBulk} className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 flex items-center gap-2">
-                <span>📧</span> Send Emails ({stats.notEmailed})
-              </button>
-            )}
-            <button onClick={() => setShowImportModal(true)} className="px-4 py-2 border border-slate-200 rounded-lg hover:bg-slate-50">Import CSV</button>
+            <button onClick={() => setShowImportModal(true)} className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 flex items-center gap-2">
+              📧 Import & Send Emails
+            </button>
             <button onClick={() => { setEditingContact(null); setShowModal(true) }} className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">+ Add Contact</button>
           </div>
         </div>
@@ -212,9 +169,9 @@ function App() {
       {sendingBulk && (
         <div className="bg-indigo-600 text-white px-4 py-3">
           <div className="max-w-7xl mx-auto flex items-center gap-4">
-            <span>Sending... {bulkProgress.sent}/{bulkProgress.total}</span>
+            <span>Sending emails... {bulkProgress.sent}/{bulkProgress.total}</span>
             <div className="flex-1 bg-indigo-400 rounded-full h-2">
-              <div className="bg-white rounded-full h-2" style={{ width: `${(bulkProgress.sent / bulkProgress.total) * 100}%` }}></div>
+              <div className="bg-white rounded-full h-2 transition-all" style={{ width: `${(bulkProgress.sent / bulkProgress.total) * 100}%` }}></div>
             </div>
           </div>
         </div>
@@ -227,13 +184,24 @@ function App() {
       )}
 
       <main className="max-w-7xl mx-auto px-4 py-8">
-        <div className="grid grid-cols-4 gap-4 mb-8">
-          <div className="bg-white rounded-xl p-5 border"><p className="text-sm text-slate-500">Total</p><p className="text-3xl font-bold">{stats.total}</p></div>
-          <div className="bg-white rounded-xl p-5 border"><p className="text-sm text-slate-500">Not Emailed</p><p className="text-3xl font-bold text-blue-600">{stats.notEmailed}</p></div>
-          <div className="bg-white rounded-xl p-5 border"><p className="text-sm text-slate-500">Emailed</p><p className="text-3xl font-bold text-amber-600">{stats.emailed}</p></div>
-          <div className="bg-white rounded-xl p-5 border"><p className="text-sm text-slate-500">Interested</p><p className="text-3xl font-bold text-green-600">{stats.interested}</p></div>
+        {/* Stats */}
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-8">
+          <div className="bg-white rounded-xl p-5 border">
+            <p className="text-sm text-slate-500">Total Emails Sent</p>
+            <p className="text-3xl font-bold text-green-600">{emailStats.totalSent}</p>
+          </div>
+          <div className="bg-white rounded-xl p-5 border">
+            <p className="text-sm text-slate-500">Leads in CRM</p>
+            <p className="text-3xl font-bold text-indigo-600">{contacts.length}</p>
+            <p className="text-xs text-slate-400">People who replied</p>
+          </div>
+          <div className="bg-white rounded-xl p-5 border">
+            <p className="text-sm text-slate-500">Interested</p>
+            <p className="text-3xl font-bold text-amber-600">{contacts.filter(c => c.status === 'interested').length}</p>
+          </div>
         </div>
 
+        {/* Filters */}
         <div className="bg-white rounded-xl border p-4 mb-6 flex gap-4">
           <input type="text" placeholder="Search..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="flex-1 px-4 py-2 border rounded-lg" />
           <select value={filterType} onChange={e => setFilterType(e.target.value)} className="px-4 py-2 border rounded-lg">
@@ -246,15 +214,25 @@ function App() {
           </select>
         </div>
 
+        {/* Contacts Table - Only shows people added via Chrome extension */}
         <div className="bg-white rounded-xl border overflow-hidden">
-          {loading ? <p className="p-8 text-center">Loading...</p> : filtered.length === 0 ? <p className="p-8 text-center text-slate-500">No contacts. Import a CSV to get started.</p> : (
+          <div className="bg-slate-50 border-b px-6 py-3">
+            <h2 className="font-semibold text-slate-700">CRM Contacts (People Who Replied)</h2>
+          </div>
+          {loading ? <p className="p-8 text-center">Loading...</p> : filtered.length === 0 ? (
+            <div className="p-8 text-center text-slate-500">
+              <p className="mb-2">No contacts in CRM yet.</p>
+              <p className="text-sm">When someone replies to your email, use the Chrome extension to add them here.</p>
+            </div>
+          ) : (
             <table className="w-full">
               <thead className="bg-slate-50 border-b">
                 <tr>
                   <th className="text-left px-6 py-4 text-xs font-semibold text-slate-500 uppercase">Contact</th>
                   <th className="text-left px-6 py-4 text-xs font-semibold text-slate-500 uppercase">Address</th>
                   <th className="text-left px-6 py-4 text-xs font-semibold text-slate-500 uppercase">Type</th>
-                  <th className="text-left px-6 py-4 text-xs font-semibold text-slate-500 uppercase">Emailed</th>
+                  <th className="text-left px-6 py-4 text-xs font-semibold text-slate-500 uppercase">Status</th>
+                  <th className="text-left px-6 py-4 text-xs font-semibold text-slate-500 uppercase">Added</th>
                   <th className="text-right px-6 py-4 text-xs font-semibold text-slate-500 uppercase">Actions</th>
                 </tr>
               </thead>
@@ -269,13 +247,16 @@ function App() {
                     <td className="px-6 py-4">
                       <span className={`px-2 py-1 rounded-full text-xs font-medium ${getTypeInfo(c.type).color}`}>{getTypeInfo(c.type).label}</span>
                     </td>
-                    <td className="px-6 py-4 text-sm">
-                      {c.last_contacted_date ? <span className="text-green-600">✓ {new Date(c.last_contacted_date).toLocaleDateString()}</span> : <span className="text-slate-400">Not yet</span>}
+                    <td className="px-6 py-4">
+                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${STATUS_OPTIONS.find(s => s.value === c.status)?.color || 'bg-gray-100'}`}>
+                        {STATUS_OPTIONS.find(s => s.value === c.status)?.label || c.status}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 text-sm text-slate-500">
+                      {c.created_at ? new Date(c.created_at).toLocaleDateString() : '—'}
                     </td>
                     <td className="px-6 py-4 text-right">
-                      <button onClick={() => handleSendEmail(c)} disabled={sendingEmail === c.id} className="p-2 hover:bg-indigo-50 rounded-lg" title="Send Email">
-                        {sendingEmail === c.id ? '...' : '📧'}
-                      </button>
+                      <button onClick={() => handleSendEmail(c)} className="p-2 hover:bg-indigo-50 rounded-lg" title="Send Email">📧</button>
                       <button onClick={() => { setEditingContact(c); setShowModal(true) }} className="p-2 hover:bg-amber-50 rounded-lg" title="Edit">✏️</button>
                       <button onClick={() => handleDeleteContact(c.id)} className="p-2 hover:bg-red-50 rounded-lg" title="Delete">🗑️</button>
                     </td>
@@ -288,7 +269,7 @@ function App() {
       </main>
 
       {showModal && <ContactModal contact={editingContact} onSave={handleSaveContact} onClose={() => { setShowModal(false); setEditingContact(null) }} />}
-      {showImportModal && <CSVImportModal onImport={handleCSVImport} onClose={() => setShowImportModal(false)} importing={importing} />}
+      {showImportModal && <CSVImportModal onSend={handleSendBulkEmails} onClose={() => setShowImportModal(false)} />}
     </div>
   )
 }
@@ -298,7 +279,7 @@ function ContactModal({ contact, onSave, onClose }) {
     firstName: contact?.firstName || '', lastName: contact?.lastName || '',
     email: contact?.email || '', phone: contact?.phone || '',
     address: contact?.address || '', type: contact?.type || 'outofstate',
-    status: contact?.status || 'new', notes: contact?.notes || ''
+    status: contact?.status || 'interested', notes: contact?.notes || ''
   })
 
   return (
@@ -331,9 +312,8 @@ function ContactModal({ contact, onSave, onClose }) {
   )
 }
 
-function CSVImportModal({ onImport, onClose, importing }) {
+function CSVImportModal({ onSend, onClose }) {
   const [data, setData] = useState([])
-  const [sendAfter, setSendAfter] = useState(true)
   const fileRef = useRef()
 
   const parseCSV = (text) => {
@@ -350,7 +330,6 @@ function CSVImportModal({ onImport, onClose, importing }) {
         const typeMap = { divorce: 'divorce', probate: 'probate', foreclosure: 'foreclosure', 'tax lien': 'taxlien', taxlien: 'taxlien', 'out of state': 'outofstate', outofstate: 'outofstate' }
         row.type = typeMap[row.type.toLowerCase()] || row.type.toLowerCase()
       }
-      row.status = 'new'
       return row
     }).filter(r => r.email)
   }
@@ -366,11 +345,18 @@ function CSVImportModal({ onImport, onClose, importing }) {
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg p-6">
-        <h2 className="text-xl font-bold mb-4">Import CSV</h2>
+        <h2 className="text-xl font-bold mb-4">📧 Import CSV & Send Emails</h2>
         
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+          <p className="text-sm text-blue-800">
+            <strong>How it works:</strong> Upload a CSV, and emails will be sent directly to everyone. 
+            Contacts are NOT saved to your CRM - only people who reply and you add via the Chrome extension will appear in your CRM.
+          </p>
+        </div>
+
         <input type="file" ref={fileRef} accept=".csv" onChange={handleFile} className="hidden" />
         <div onClick={() => fileRef.current?.click()} className="border-2 border-dashed rounded-xl p-8 text-center cursor-pointer hover:border-indigo-400 mb-4">
-          {data.length > 0 ? <p className="text-indigo-600 font-medium">{data.length} contacts found</p> : <p className="text-slate-500">Click to upload CSV</p>}
+          {data.length > 0 ? <p className="text-indigo-600 font-medium">{data.length} contacts ready to email</p> : <p className="text-slate-500">Click to upload CSV</p>}
         </div>
 
         <div className="bg-slate-50 rounded-lg p-4 mb-4 text-sm">
@@ -379,19 +365,33 @@ function CSVImportModal({ onImport, onClose, importing }) {
         </div>
 
         {data.length > 0 && (
-          <label className="flex items-center gap-3 bg-green-50 border border-green-200 rounded-lg p-4 mb-4 cursor-pointer">
-            <input type="checkbox" checked={sendAfter} onChange={e => setSendAfter(e.target.checked)} className="w-5 h-5" />
-            <div>
-              <p className="font-medium text-green-800">Send emails after import</p>
-              <p className="text-sm text-green-600">Automatically send to all {data.length} contacts</p>
-            </div>
-          </label>
+          <div className="mb-4 max-h-40 overflow-y-auto border rounded-lg">
+            <table className="w-full text-sm">
+              <thead className="bg-slate-50 sticky top-0">
+                <tr>
+                  <th className="text-left px-3 py-2">Name</th>
+                  <th className="text-left px-3 py-2">Email</th>
+                  <th className="text-left px-3 py-2">Type</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {data.slice(0, 5).map((r, i) => (
+                  <tr key={i}>
+                    <td className="px-3 py-2">{r.firstName} {r.lastName}</td>
+                    <td className="px-3 py-2">{r.email}</td>
+                    <td className="px-3 py-2">{r.type}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {data.length > 5 && <p className="text-center text-slate-400 text-xs py-2">+{data.length - 5} more</p>}
+          </div>
         )}
 
         <div className="flex gap-3">
           <button onClick={onClose} className="flex-1 px-4 py-2 border rounded-lg">Cancel</button>
-          <button onClick={() => onImport(data, sendAfter)} disabled={data.length === 0 || importing} className="flex-1 px-4 py-2 bg-indigo-600 text-white rounded-lg disabled:opacity-50">
-            {importing ? 'Importing...' : `Import${sendAfter ? ' & Send' : ''}`}
+          <button onClick={() => onSend(data)} disabled={data.length === 0} className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg disabled:opacity-50">
+            Send {data.length} Emails
           </button>
         </div>
       </div>
