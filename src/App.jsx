@@ -3,6 +3,7 @@ import { useState, useEffect, useRef } from 'react'
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001'
 
 const LEAD_TYPES = [
+  { value: '', label: 'Not Set', color: 'bg-slate-100 text-slate-600' },
   { value: 'divorce', label: 'Divorce', color: 'bg-violet-100 text-violet-700' },
   { value: 'probate', label: 'Probate', color: 'bg-sky-100 text-sky-700' },
   { value: 'foreclosure', label: 'Foreclosure', color: 'bg-rose-100 text-rose-700' },
@@ -19,9 +20,9 @@ const STATUS_OPTIONS = [
 ]
 
 const SENDER_CONFIG = {
-  yourName: 'Nic Ganley',
-  yourCompany: 'Iron Valley Real Estate',
-  yourPhone: '(302) 612-0329'
+  yourName: 'Dylan Bennett',
+  yourCompany: 'ABC Real Estate',
+  yourPhone: '(302) 922-4238'
 }
 
 function App() {
@@ -359,7 +360,7 @@ function ContactModal({ contact, onSave, onClose }) {
   const [form, setForm] = useState({
     firstName: contact?.firstName || '', lastName: contact?.lastName || '',
     email: contact?.email || '', phone: contact?.phone || '',
-    address: contact?.address || '', type: contact?.type || 'outofstate',
+    address: contact?.address || '', type: contact?.type || '',
     status: contact?.status || 'interested', notes: contact?.notes || ''
   })
 
@@ -426,19 +427,63 @@ function ImportModal({ onSend, onClose }) {
 
   const parseCSV = (text) => {
     const lines = text.trim().split('\n')
-    const headers = lines[0].split(',').map(h => h.trim().toLowerCase().replace(/['"]/g, ''))
-    const map = { firstname: 'firstName', first_name: 'firstName', lastname: 'lastName', last_name: 'lastName', email: 'email', address: 'address', type: 'type', phone: 'phone' }
+    const headers = lines[0].split(',').map(h => h.trim().toLowerCase().replace(/['"]/g, '').replace(/\s+/g, ''))
+    
+    // Map common header variations
+    const map = { 
+      firstname: 'firstName', first_name: 'firstName', first: 'firstName',
+      lastname: 'lastName', last_name: 'lastName', last: 'lastName',
+      fullname: 'fullName', full_name: 'fullName', name: 'fullName',
+      email: 'email', emailaddress: 'email', e_mail: 'email',
+      phone: 'phone', phonenumber: 'phone', telephone: 'phone', cell: 'phone', mobile: 'phone',
+      address: 'address', propertyaddress: 'address', property: 'address', streetaddress: 'address',
+      type: 'type', leadtype: 'type', category: 'type'
+    }
     const mapped = headers.map(h => map[h] || h)
+    
     return lines.slice(1).filter(l => l.trim()).map(line => {
-      const vals = line.split(',').map(v => v.trim().replace(/^["']|["']$/g, ''))
+      // Handle commas inside parentheses (for phone numbers) and quotes
+      const vals = []
+      let current = ''
+      let inParens = false
+      let inQuotes = false
+      for (const char of line) {
+        if (char === '"' && !inParens) inQuotes = !inQuotes
+        if (char === '(' && !inQuotes) inParens = true
+        if (char === ')' && !inQuotes) inParens = false
+        if (char === ',' && !inParens && !inQuotes) {
+          vals.push(current.trim().replace(/^["']|["']$/g, ''))
+          current = ''
+        } else {
+          current += char
+        }
+      }
+      vals.push(current.trim().replace(/^["']|["']$/g, ''))
+      
       const row = {}
       mapped.forEach((h, i) => { if (vals[i]) row[h] = vals[i] })
-      if (row.type) {
-        const typeMap = { divorce: 'divorce', probate: 'probate', foreclosure: 'foreclosure', 'tax lien': 'taxlien', taxlien: 'taxlien', 'out of state': 'outofstate', outofstate: 'outofstate' }
-        row.type = typeMap[row.type.toLowerCase()] || row.type.toLowerCase()
+      
+      // Split full name into firstName and lastName if needed
+      if (row.fullName && !row.firstName) {
+        const nameParts = row.fullName.trim().split(' ')
+        row.firstName = nameParts[0] || ''
+        row.lastName = nameParts.slice(1).join(' ') || ''
+        row.name = row.fullName
       }
+      
+      // Build name from parts if we have them
+      if (!row.name && (row.firstName || row.lastName)) {
+        row.name = `${row.firstName || ''} ${row.lastName || ''}`.trim()
+      }
+      
+      // Handle type - normalize if present, leave empty if not
+      if (row.type) {
+        const typeMap = { divorce: 'divorce', probate: 'probate', foreclosure: 'foreclosure', 'taxlien': 'taxlien', 'tax lien': 'taxlien', 'outofstate': 'outofstate', 'out of state': 'outofstate', 'outofsate': 'outofstate' }
+        row.type = typeMap[row.type.toLowerCase()] || ''
+      }
+      
       return row
-    }).filter(r => r.email)
+    }).filter(r => r.email || r.phone) // Keep if has email OR phone
   }
 
   const handleFile = (e) => {
@@ -470,16 +515,16 @@ function ImportModal({ onSend, onClose }) {
             {data.length > 0 && <p className="text-sm text-slate-500 mt-1">{data.length} contacts ready</p>}
           </div>
           <div className="bg-slate-50 rounded-lg p-4">
-            <p className="text-xs font-medium text-slate-700 mb-1">Required columns:</p>
-            <p className="text-xs text-slate-500">firstName, lastName, email, address, type</p>
-            <p className="text-xs text-slate-400 mt-1">Types: divorce, probate, foreclosure, taxlien, outofstate</p>
+            <p className="text-xs font-medium text-slate-700 mb-1">Flexible columns:</p>
+            <p className="text-xs text-slate-500">Name, First Name, Last Name, Email, Phone, Address, Type</p>
+            <p className="text-xs text-slate-400 mt-1">All fields optional except email or phone</p>
           </div>
           {data.length > 0 && (
             <div className="border border-slate-200 rounded-lg overflow-hidden">
               <table className="w-full text-sm">
-                <thead className="bg-slate-50"><tr><th className="text-left px-4 py-2 text-xs font-medium text-slate-500">Name</th><th className="text-left px-4 py-2 text-xs font-medium text-slate-500">Email</th><th className="text-left px-4 py-2 text-xs font-medium text-slate-500">Type</th></tr></thead>
+                <thead className="bg-slate-50"><tr><th className="text-left px-4 py-2 text-xs font-medium text-slate-500">Name</th><th className="text-left px-4 py-2 text-xs font-medium text-slate-500">Contact</th><th className="text-left px-4 py-2 text-xs font-medium text-slate-500">Type</th></tr></thead>
                 <tbody className="divide-y divide-slate-100">
-                  {data.slice(0, 3).map((r, i) => <tr key={i}><td className="px-4 py-2 text-slate-900">{r.firstName} {r.lastName}</td><td className="px-4 py-2 text-slate-500">{r.email}</td><td className="px-4 py-2 text-slate-500">{r.type || '—'}</td></tr>)}
+                  {data.slice(0, 3).map((r, i) => <tr key={i}><td className="px-4 py-2 text-slate-900">{r.firstName || ''} {r.lastName || ''}</td><td className="px-4 py-2 text-slate-500">{r.email || r.phone || '—'}</td><td className="px-4 py-2 text-slate-500">{r.type || 'Not set'}</td></tr>)}
                 </tbody>
               </table>
               {data.length > 3 && <p className="text-center text-xs text-slate-400 py-2 bg-slate-50">+{data.length - 3} more</p>}
@@ -494,5 +539,7 @@ function ImportModal({ onSend, onClose }) {
     </div>
   )
 }
+
+export default App
 
 export default App
